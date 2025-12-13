@@ -52,7 +52,7 @@ os.chdir(locDir)
 picfile = open(filefqn, "wb")
 
 # take the photo
-with PiCamera2() as camera:
+with Picamera2() as camera:
         #camera.resolution = (int(resolutionX), int(resolutionY))
         #camera.rotation = rotation
         #camera.hflip = hflip
