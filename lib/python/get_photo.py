@@ -77,7 +77,7 @@ with Picamera2() as camera:
 
         camera.start()
         time.sleep(agcwait)
-        camera.capture_file(picfile)
+        camera.capture_file(picfile, format=i_format)
 
 # flush the buffer
 picfile.close()
