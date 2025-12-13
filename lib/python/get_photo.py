@@ -49,7 +49,7 @@ locDir,locName = os.path.split(os.path.abspath(sys.argv[0]))
 os.chdir(locDir)
 
 # Open the File to be stored
-picfile = open(filefqn, "wb")
+#picfile = open(filefqn, "wb")
 
 # take the photo
 with Picamera2() as camera:
@@ -77,7 +77,7 @@ with Picamera2() as camera:
 
         camera.start()
         time.sleep(agcwait)
-        camera.capture_file(picfile, format=i_format)
+        camera.capture_file(filefqn, format=i_format)
 
 # flush the buffer
-picfile.close()
+#picfile.close()
