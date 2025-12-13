@@ -1,4 +1,4 @@
-import picamera
+from picamera2 import Picamera2
 import sys
 import os
 import time
@@ -26,7 +26,7 @@ awb = sys.argv[18]
 # consider jpeg
 if fileFormat == "jpg":
     i_format = "jpeg"
-else: 
+else:
     i_format = fileFormat
 
 # Set vflip and hflip if needed
@@ -38,10 +38,10 @@ if sys.argv[7] == "1":
     vflip = True
 else:
     vflip = False
-    
+
 # Set the filefqn
 if fileFormat == "jpeg":
-    fileFormat = "jpg"   
+    fileFormat = "jpg"
 filefqn = filePath + fileName
 
 # Change to the operating folder
@@ -52,29 +52,32 @@ os.chdir(locDir)
 picfile = open(filefqn, "wb")
 
 # take the photo
-with picamera.PiCamera() as camera:
-        camera.resolution = (int(resolutionX), int(resolutionY))
-        camera.rotation = rotation
-        camera.hflip = hflip
-        camera.vflip = vflip
-        camera.brightness = brightness
-        camera.sharpness = sharpness
-        camera.contrast = contrast
-        camera.image_effect = imageeffect
-        camera.exposure_mode = exposuremode
-        camera.iso = iso
-        camera.led = led
-        camera.awb_mode = awb
-        
+with PiCamera2() as camera:
+        #camera.resolution = (int(resolutionX), int(resolutionY))
+        #camera.rotation = rotation
+        #camera.hflip = hflip
+        #camera.vflip = vflip
+        #camera.brightness = brightness
+        #camera.sharpness = sharpness
+        #camera.contrast = contrast
+        #camera.image_effect = imageeffect
+        #camera.exposure_mode = exposuremode
+        #camera.iso = iso
+        #camera.led = led
+        #camera.awb_mode = awb
+
+        #time.sleep(agcwait)
+
+        #if i_format == "jpeg":
+        #    camera.capture(picfile, i_format, quality=quality)
+        #    camera.close()
+        #else:
+        #    camera.capture(picfile, i_format, use_video_port=True)
+        #    camera.close()
+
+        camera.start()
         time.sleep(agcwait)
-        
-        if i_format == "jpeg":
-            camera.capture(picfile, i_format, quality=quality)
-            camera.close()
-        else:
-            camera.capture(picfile, i_format, use_video_port=True)
-            camera.close()
-            
+        camera.capture_file(picfile)
 
 # flush the buffer
 picfile.close()
