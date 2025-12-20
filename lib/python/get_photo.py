@@ -75,6 +75,10 @@ with Picamera2() as camera:
         #    camera.capture(picfile, i_format, use_video_port=True)
         #    camera.close()
 
+	camera.configure(camera.create_still_configuration(
+		{"size": (resolutionX, resolutionY)}
+	))
+
         camera.start()
         time.sleep(agcwait)
         camera.capture_file(filefqn, format=i_format)
