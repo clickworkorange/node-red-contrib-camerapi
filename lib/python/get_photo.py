@@ -1,4 +1,5 @@
 from picamera2 import Picamera2
+from libcamera import Transform
 import sys
 import os
 import time
@@ -75,10 +76,12 @@ with Picamera2() as camera:
         #    camera.capture(picfile, i_format, use_video_port=True)
         #    camera.close()
 
-	camera.configure(camera.create_still_configuration(
-		{"size": (resolutionX, resolutionY)}
-	))
+#        camera.configure(camera.create_still_configuration(
+#            {"size": (480, 320), "transform": Transform(hflip=1, vflip=1)}
+#        ))
 
+
+        camera.configure(camera.create_still_configuration(main={"size": (1024, 768)}, transform=Transform(hflip=1, vflip=1)))
         camera.start()
         time.sleep(agcwait)
         camera.capture_file(filefqn, format=i_format)
