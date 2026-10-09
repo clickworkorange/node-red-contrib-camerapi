@@ -21,10 +21,14 @@ module.exports = function(RED) {
 	"use strict";
 
 	var settings = RED.settings;
-	var events = require("events");
-	var exec = require("child_process").exec;
-	var isUtf8 = require("is-utf8");
-	var bufMaxSize = 32768;  // Max serial buffer size, for inputs...
+	var execFile = require("child_process").execFile;
+	var captureTimeout = 30000;	// ms before a hung rpicam-still is killed
+
+	// rpicam-still only knows these; anything else falls back to its default
+	var encodings = { jpeg: "jpg", jpg: "jpg", png: "png", bmp: "bmp", rgb: "rgb", yuv: "yuv420" };
+	var exposures = { auto: "normal", sports: "sport", night: "long", nightpreview: "long", verylong: "long" };
+	var awbs = { auto: "auto", sunlight: "daylight", cloudy: "cloudy", shade: "cloudy", tungsten: "tungsten",
+		fluorescent: "fluorescent", incandescent: "incandescent", flash: "daylight", horizon: "tungsten" };
 
 
 	// CameraPI Take Photo Node
@@ -65,10 +69,9 @@ module.exports = function(RED) {
 			const { v4: uuidv4 } = require('uuid');
 			var uuid = uuidv4();
 			var os = require("os");
-			var localdir = __dirname;
 			var homedir = os.homedir();
 			var defdir = homedir + "/Pictures/";
-			var cl = "python " + localdir + "/lib/python/get_photo.py";
+			var args = ["--nopreview"];
 			var resolution;
 			var fileformat;
 			var filename;
@@ -79,16 +82,20 @@ module.exports = function(RED) {
 			var sharpness;
 			var brightness;
 			var contrast;
-			var imageeffect;
 			var agcwait;
 			var quality;
-			var led;
 			var awb;
 			var rotation;
 			var exposuremode;
 			var iso;
 
-			node.status({fill:"green",shape:"dot",text:"connected"});
+			// One camera: a second capture can't get it while the first holds it
+			if (Object.keys(node.activeProcesses).length > 0) {
+				node.error("CameraPi: capture already running, request dropped", msg);
+				return;
+			}
+
+			node.status({fill:"green",shape:"dot",text:"capturing"});
 
 			// Check the given filemode
 			if((msg.filemode) && (msg.filemode !== "")) {
@@ -106,21 +113,13 @@ module.exports = function(RED) {
 				filename = "pic_" + uuid + ".jpg";
 				fileformat = "jpeg";
 				filepath = homedir + "/";
-				filefqn = filepath + filename;
-				if (RED.settings.verbose) { node.log("camerapi takephoto:" + filefqn); }
-				console.log("CameraPi (log): Tempfile - " + filefqn);
-
-				cl += " " + filename + " " + filepath + " " + fileformat;
+				if (RED.settings.verbose) { node.log("camerapi takephoto:" + filepath + filename); }
 			} else if (filemode == "2") {
 				// Auto file name mode (old Generate)
 				filename = "pic_" + uuid + ".jpg";
 				fileformat = "jpeg";
 				filepath = defdir;
-				filefqn = filepath + filename;
-				if (RED.settings.verbose) { node.log("camerapi takephoto:" + filefqn); }
-				console.log("CameraPi (log): Generate - " + filefqn);
-
-				cl += " " + filename + " " + filepath + " " + fileformat;
+				if (RED.settings.verbose) { node.log("camerapi takephoto:" + filepath + filename); }
 			} else {
 				 // Specific FileName
 				 if ((msg.filename) && (msg.filename.trim() !== "")) {
@@ -132,7 +131,6 @@ module.exports = function(RED) {
 						filename = "pic_" + uuid + ".jpg";
 					}
 				}
-				cl += " " + filename;
 
 				if (node.filedefpath == "1" ) {
 					filepath = defdir;
@@ -147,7 +145,6 @@ module.exports = function(RED) {
 						}
 					}
 				}
-				cl += " " + filepath;
 
 				if ((msg.fileformat) && (msg.fileformat.trim() !== "")) {
 					fileformat = msg.fileformat;
@@ -158,9 +155,13 @@ module.exports = function(RED) {
 						fileformat = "jpeg";
 					}
 				}
-				cl += " " + fileformat;
-				if (RED.settings.verbose) { node.log("camerapi takephoto:" + filefqn); }
 			}
+			filefqn = filepath + filename;
+			if (!encodings[fileformat]) {
+				node.warn("CameraPi: format " + fileformat + " not supported by rpicam-still, using jpeg");
+				fileformat = "jpeg";
+			}
+			args.push("--encoding", encodings[fileformat], "--output", filefqn);
 
 			// Resolution of the image
 			if ((msg.resolution) && (msg.resolution !== "")) {
@@ -169,42 +170,29 @@ module.exports = function(RED) {
 				if (node.resolution) {
 					resolution = node.resolution;
 				} else {
-					resolution = "10";	
+					resolution = "10";
 				}
 			}
-			if (resolution == "1") {
-				cl += " 320 240";
-			} else if (resolution == "2" ) {
-				cl += " 640 480";
-			} else if (resolution == "3" ) {
-				cl += " 800 600";
-			} else if (resolution == "4" ) {
-				cl += " 1024 768";
-			} else if (resolution == "5") {
-				cl += " 1280 720";
-			} else if (resolution == "6") {
-				cl += " 1640 922";
-			} else if (resolution == "7") {
-				cl += " 1640 1232";
-			} else if (resolution == "8" ) {
-				cl += " 1920 1080";
-			} else if (resolution == "9") {
-				cl += " 2592 1944";
-			} else {
-				cl += " 3280 2464";
-			}
+			var sizes = { "1": [320, 240], "2": [640, 480], "3": [800, 600], "4": [1024, 768],
+				"5": [1280, 720], "6": [1640, 922], "7": [1640, 1232], "8": [1920, 1080], "9": [2592, 1944] };
+			var size = sizes[resolution] || [3280, 2464];
+			args.push("--width", size[0], "--height", size[1]);
 
-			// rotation
+			// rotation – rpicam-still only does 0 and 180
 			if ((msg.rotation) && (msg.rotation !== "")) {
 				rotation = msg.rotation;
 				} else {
 					if (node.rotation) {
 						rotation = node.rotation;
 					} else {
-						rotation = "0";	
+						rotation = "0";
 					}
 				}
-			cl += " " + rotation;
+			if (rotation == "180") {
+				args.push("--rotation", "180");
+			} else if (rotation != "0") {
+				node.warn("CameraPi: rotation " + rotation + " not supported by rpicam-still, ignored");
+			}
 
 			// hflip and vflip
 			if ((msg.fliph) && (msg.fliph !== "")) {
@@ -213,7 +201,7 @@ module.exports = function(RED) {
 				if (node.fliph) {
 					fliph = node.fliph;
 				} else {
-					fliph = "1";	
+					fliph = "1";
 				}
 			}
 			if ((msg.flipv) && (msg.flipv !== "")) {
@@ -222,58 +210,47 @@ module.exports = function(RED) {
 				if (node.flipv) {
 					flipv = node.flipv;
 				} else {
-					flipv= "1";	
+					flipv= "1";
 				}
 			}
-			cl += " " + fliph + " " + flipv;
+			if (fliph == "1") { args.push("--hflip"); }
+			if (flipv == "1") { args.push("--vflip"); }
 
-			// brightness
+			// brightness – 0..100 (50 neutral) to rpicam's -1..1
 			if ((msg.brightness) && (msg.brightness !== "")) {
 				brightness = msg.brightness;
 			} else {
 				if (node.brightness) {
 					brightness = node.brightness;
 				} else {
-					brightness = "50";	
+					brightness = "50";
 				}
 			}
-			cl += " " + brightness;
+			args.push("--brightness", (Number(brightness) - 50) / 50);
 
-			// contrast
+			// contrast – -100..100 (0 neutral) to rpicam's 0..2 (1 neutral)
 			if ((msg.contrast) && (msg.contrast !== "")) {
 				contrast = msg.contrast;
 			} else {
 				if (node.contrast) {
 					contrast = node.contrast;
 				} else {
-					contrast = "0";	
+					contrast = "0";
 				}
 			}
-			cl += " " + contrast;
+			args.push("--contrast", 1 + Number(contrast) / 100);
 
-			// sharpness
+			// sharpness – same scaling as contrast
 			if ((msg.sharpness) && (msg.sharpness !== "")) {
 				sharpness = msg.sharpness;
 			} else {
 				if (node.sharpness) {
 					sharpness = node.sharpness;
 				} else {
-					sharpness = "0";	
+					sharpness = "0";
 				}
 			}
-			cl += " " + sharpness;
-
-			// imageeffect
-			if ((msg.imageeffect) && (msg.imageeffect !== "")) {
-				imageeffect = msg.imageeffect;
-			} else {
-				if (node.imageeffect) {
-					imageeffect = node.imageeffect;
-				} else {
-					imageeffect = "none";	
-				}
-			}
-			cl += " " + imageeffect;
+			args.push("--sharpness", 1 + Number(sharpness) / 100);
 
 			// exposure-mode
 			if ((msg.exposuremode) && (msg.exposuremode !== "")) {
@@ -282,35 +259,35 @@ module.exports = function(RED) {
 					if (node.exposuremode) {
 						exposuremode = node.exposuremode;
 					} else {
-						exposuremode = "auto";					
+						exposuremode = "auto";
 					}
 				}
-			cl += " " + exposuremode;
+			args.push("--exposure", exposures[exposuremode] || "normal");
 
-			// iso
+			// iso – 0 = auto, otherwise analogue gain ≈ ISO / 100
 			if ((msg.iso) && (msg.iso !== "")) {
 				iso = msg.iso;
 			} else {
 				if (node.iso) {
 					iso = node.iso;
 				} else {
-					iso = "0";					
+					iso = "0";
 				}
 			}
-			cl += " " + iso;
+			if (Number(iso) > 0) { args.push("--gain", Number(iso) / 100); }
 
-			// agcwait
+			// agcwait – seconds the auto exposure/white balance gets to settle before the capture
 			if ((msg.agcwait) && (msg.agcwait !== "")) {
 				agcwait = msg.agcwait;
 			} else {
 				if (node.agcwait) {
 					agcwait = node.agcwait;
 				} else {
-					agcwait = 1.0;					
+					agcwait = 1.0;
 				}
 			}
-			cl += " " + agcwait;
-			
+			args.push("--timeout", Math.max(100, Math.round(Number(agcwait) * 1000)));
+
 			// jpeg quality
 			if ((msg.quality) && (msg.quality !== "")) {
 				quality = msg.quality;
@@ -318,22 +295,10 @@ module.exports = function(RED) {
 				if (node.quality) {
 					quality = node.quality;
 				} else {
-					quality = 80;					
+					quality = 80;
 				}
 			}
-			cl += " " + quality;
-			
-			// led on/off
-			if ((msg.led) && (msg.led !== "")) {
-				led = msg.led;
-			} else {
-				if (node.led) {
-					led = node.led;
-				} else {
-					led = 0;					
-				}
-			}
-			cl += " " + led;
+			args.push("--quality", quality);
 
 			// awb
 			if ((msg.awb) && (msg.awb != "")) {
@@ -345,56 +310,43 @@ module.exports = function(RED) {
 					awb = "auto";
 				}
 			}
-			cl += " " + awb;
+			args.push("--awb", awbs[awb] || "auto");
 
-			if (RED.settings.verbose) { node.log(cl); }
+			// image effect and LED have no rpicam-still equivalent and are ignored
 
-			filefqn = filepath + filename;
+			if (RED.settings.verbose) { node.log("rpicam-still " + args.join(" ")); }
 
-			var child = exec(cl, {encoding: "binary", maxBuffer:10000000}, function (error, stdout, stderr) {
-				var retval = new Buffer(stdout,"binary");
-				try {
-					if (isUtf8(retval)) { retval = retval.toString(); }
-				} catch(e) {
-					node.log(RED._("exec.badstdout"));
-				}
-
-				// check error
-				var msg2 = {payload:stderr};
-				var msg3 = null;
-				//console.log("[exec] stdout: " + stdout);
-				//console.log("[exec] stderr: " + stderr);
+			// execFile: no shell, so msg.filename/filepath can't inject commands
+			var child = execFile("rpicam-still", args.map(String), {timeout: captureTimeout, killSignal: "SIGKILL"}, function (error, stdout, stderr) {
+				delete node.activeProcesses[child.pid];
 				if (error !== null) {
-					msg3 = {payload:error};
-					console.error("CameraPi (err): " + error);
-					msg.payload = "";
-					msg.filename = "";
-					msg.fileformat = "";
-					msg.filepath = "";
+					var reason = error.killed ? "timed out after " + captureTimeout / 1000 + " s" : error.message;
+					console.error("CameraPi (err): " + reason + " " + stderr);
+					node.status({fill:"red",shape:"ring",text:error.killed ? "timed out" : "failed"});
+					node.error("CameraPi: capture " + reason, msg);
+					return;
+				}
+				msg.filename = filename;
+				msg.filepath = filepath;
+				msg.fileformat = fileformat;
+
+				// get the raw image into payload and delete tempfile on buffermode
+				if (filemode == "0") {
+					// put the imagefile into payload
+					msg.payload = fs.readFileSync(filefqn);
+
+					// delete tempfile
+					fsextra.remove(filefqn, function(err) {
+					  if (err) return console.error("CameraPi (err): " + err);
+					  console.log("CameraPi (log): " + filefqn + " remove success!")
+					});
 				} else {
-					msg.filename = filename;
-					msg.filepath = filepath;
-					msg.fileformat = fileformat;
-
-					// get the raw image into payload and delete tempfile on buffermode
-					if (filemode == "0") {
-						// put the imagefile into payload
-						msg.payload = fs.readFileSync(filefqn);
-
-						// delete tempfile
-						fsextra.remove(filefqn, function(err) {
-						  if (err) return console.error("CameraPi (err): " + err);
-						  console.log("CameraPi (log): " + filefqn + " remove success!")
-						});			   
-					} else {
-						msg.payload = filefqn;
-						console.log("CameraPi (log): " + filefqn + " written with success!")
-					}
+					msg.payload = filefqn;
+					console.log("CameraPi (log): " + filefqn + " written with success!")
 				}
 
 				node.status({});
 				node.send(msg);
-				delete node.activeProcesses[child.pid];
 			});
 
 			child.on("error",function(){});
@@ -413,6 +365,11 @@ module.exports = function(RED) {
 			else {
 				// This node is being restarted
 			}
+			// Don't leave a capture holding the camera across a redeploy
+			for (var pid in node.activeProcesses) {
+				node.activeProcesses[pid].kill("SIGKILL");
+			}
+			node.activeProcesses = {};
 			done();
 		});
 	}

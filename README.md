@@ -11,11 +11,14 @@ Run the following command in the root directory of your Node-RED install or home
 
 ### Additionally you have to install on the Raspberry Pi 
 
-First you have to install a Raspberry Pi Camera physically and don't forget to enable the Camera in raspi-config. See <a href="https://projects.raspberrypi.org/en/projects/getting-started-with-picamera" target="_new">Pi Camera setup</a>. Also check if you have installed the picamera module for python. 
+This fork captures with `rpicam-still` (the libcamera stack), not the Python picamera library. On
+Raspberry Pi OS Lite install the package without the preview/desktop dependencies:
 ```sh
         sudo apt-get update
-        sudo apt-get install python-picamera python3-picamera
+        sudo apt-get install rpicam-apps-lite
 ```
+A capture that does not finish within 30 s is killed and reported as an error; only one capture runs
+at a time. Image effect, LED and rotation 90/270 have no `rpicam-still` equivalent and are ignored.
 
 If you are using the default path during the fileoption set - the path /home/pi/Pictures will be used.
 
